@@ -30,3 +30,13 @@
 
 
 
+
+## 2026-11-23
+- Asked: Run every validation case in `spec.md` against the app calculations and compare expected with actual values.
+- Changed: Executed all five cases through `04_app/beam_calculations.py`; appended this validation record.
+- Worked: Yes; all stated values matched within the spec's rounding.
+
+## 2026-11-23
+- Asked: Commit the changes from the Beam Designer work.
+- Changed: Prepared the existing app commit state and added this commit request to the prompt log.
+- Worked: Pending commit.
