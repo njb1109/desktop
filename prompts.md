@@ -39,4 +39,35 @@
 ## 2026-11-23
 - Asked: Commit the changes from the Beam Designer work.
 - Changed: Prepared the existing app commit state and added this commit request to the prompt log.
-- Worked: Pending commit.
+- Worked: Yes; committed as f84c23b.
+
+## 2026-11-23
+- Asked: Add a Features section to `spec.md` for File menu Save/Open, and remove Saving designs from Out of scope first.
+- Changed: Removed the out-of-scope item and added the save/open requirements, including the beam inputs to persist and restore. Updated this prompt log.
+- Worked: Yes; the feature is now specified and Saving designs is no longer out of scope.
+
+## 2026-11-23
+- Asked: Build the Save/Open feature described in the Features section of `spec.md`.
+- Changed: Added a File menu with Save/Open, JSON serialization and restoration for beam settings and loads, input validation for opened files, and saved-file title/status updates. Updated this prompt log.
+- Worked: Feature implementation is in place; runtime behavior was not verified.
+
+## 2026-11-23
+- Asked: Add an Export results button that saves x, V, M, and deflection along the beam to an Excel-compatible CSV.
+- Changed: Added the export button and CSV writer using the beam calculation grid, including both shear sides at point loads; added the feature to `spec.md` and logged this request.
+- Worked: Implementation is in place; runtime behavior was not verified.
+
+## 2026-11-23
+- Asked: Add a Calculation sheet feature that exports the diagrams and checks to a PDF with inputs at the top.
+- Changed: Added a Calculation sheet PDF button and report generator with beam inputs, diagrams, and bending/deflection checks; added the feature to `spec.md` and updated this log.
+- Worked: Implementation is in place; runtime behavior was not verified.
+
+## 2026-11-23
+- Asked: Make the calculation sheet inputs larger and list bending and deflection test results vertically without boxes.
+- Changed: Increased the input typography and spacing, and replaced the side-by-side boxed checks with stacked text results.
+- Worked: Design changes are in place; PDF output was not runtime-verified.
+
+## 2026-11-23
+- Asked: Commit the calculation-sheet design changes.
+- Changed: Prepared the application, spec, and prompt-log updates for commit; left untracked generated files untouched.
+- Worked: Yes; committed as f84c23b.
+

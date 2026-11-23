@@ -107,10 +107,22 @@ sizing a floor beam or deck joist.
 5. Simply supported, 30 ft, W18x35, uniform 2 kips/ft from 0 to 15 ft
    only: reactions 22.5 k (left) and 7.5 k (right); max moment
    126.6 kip-ft at 11.25 ft.
+
+## Features
+- A File menu with Save and Open commands. Save writes the current beam to a
+  JSON file using a file dialog. Store the support type, span, material and
+  section, deflection limit, and all point and uniform loads.
+- Open reads a saved beam file and restores those inputs, then updates the
+  beam drawing, diagrams, checks, and section recommendation.
+- An Export CSV button saves position x (ft), shear V (kips), moment M
+  (kip-ft), and deflection y (in) along the beam to a CSV file that opens in
+  Excel.
+- A Calculation sheet button saves the diagrams and checks to a PDF, with
+  the beam inputs listed at the top, ready to submit with a design.
+
 ## Out of scope
 - Self-weight, shear stress, lateral-torsional buckling, load
   combinations, and continuous beams.
-- Saving designs.
 
 ## Build stages
 1. **Static page mockup (no calculations):** Lay out the input panel, example

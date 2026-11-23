@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import csv
+import json
 import math
+import textwrap
 import tkinter as tk
-from tkinter import ttk
+from tkinter import filedialog, messagebox, ttk
+from pathlib import Path
 from typing import Any
 
 import numpy as np
+from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Polygon, Rectangle
@@ -73,6 +78,7 @@ class BeamDesigner:
         self.refresh_after_id: str | None = None
         self.drag_point_index: int | None = None
         self.result: dict[str, Any] | None = None
+        self.current_file: str | None = None
         self.point_rows: list[dict[str, Any]] = []
         self.uniform_rows: list[dict[str, Any]] = []
         self.point_counter = 0
@@ -113,6 +119,13 @@ class BeamDesigner:
         style.configure("TLabelframe.Label", background=BG, foreground=INK, font=("Segoe UI", 10, "bold"))
 
     def _build_layout(self) -> None:
+        menu_bar = tk.Menu(self.root)
+        file_menu = tk.Menu(menu_bar, tearoff=False)
+        file_menu.add_command(label="Save", command=self.save_design)
+        file_menu.add_command(label="Open", command=self.open_design)
+        menu_bar.add_cascade(label="File", menu=file_menu)
+        self.root.configure(menu=menu_bar)
+
         header = ttk.Frame(self.root, padding=(18, 13, 18, 8))
         header.pack(fill="x")
         ttk.Label(header, text="Beam Designer", style="Title.TLabel").pack(side="left")
@@ -261,12 +274,20 @@ class BeamDesigner:
         bottom.grid(row=2, column=0, sticky="ew", pady=(10, 0))
         bottom.columnconfigure(0, weight=1)
         ttk.Label(bottom, textvariable=self.recommendation_var, style="Card.TLabel").grid(
-            row=0, column=0, sticky="w"
+            row=0, column=0, columnspan=4, sticky="w", pady=(0, 6)
         )
+        self.export_button = ttk.Button(
+            bottom, text="Export CSV", command=self.export_results, state="disabled"
+        )
+        self.export_button.grid(row=1, column=1, sticky="e", padx=(8, 0))
+        self.calculation_sheet_button = ttk.Button(
+            bottom, text="Calculation sheet PDF", command=self.export_calculation_sheet, state="disabled"
+        )
+        self.calculation_sheet_button.grid(row=1, column=2, sticky="e", padx=(8, 0))
         self.use_recommendation_button = ttk.Button(
             bottom, text="Use section", style="Accent.TButton", command=self._use_recommendation, state="disabled"
         )
-        self.use_recommendation_button.grid(row=0, column=1, sticky="e", padx=(8, 0))
+        self.use_recommendation_button.grid(row=1, column=3, sticky="e", padx=(8, 0))
 
     def _make_check_card(self, parent: ttk.Frame, title: str, formula: str) -> ttk.Frame:
         card = ttk.Frame(parent, style="Card.TFrame", padding=(10, 5), relief="solid")
@@ -414,6 +435,393 @@ class BeamDesigner:
             "uniform_loads": uniforms,
         }
 
+    def save_design(self) -> None:
+        try:
+            inputs = self._read_inputs()
+            calc.analyze_beam(**inputs)
+        except (ValueError, tk.TclError, ZeroDivisionError) as exc:
+            messagebox.showerror("Cannot save beam", str(exc), parent=self.root)
+            return
+
+        path = self.current_file
+        if path is None:
+            path = filedialog.asksaveasfilename(
+                parent=self.root,
+                title="Save beam",
+                defaultextension=".json",
+                filetypes=(("Beam Designer files", "*.json"), ("All files", "*.*")),
+            )
+            if not path:
+                return
+
+        document = {
+            "format": "beam-designer",
+            "version": 1,
+            "support": inputs["support"],
+            "span_ft": inputs["span_ft"],
+            "material": inputs["material"],
+            "section": inputs["section_name"],
+            "deflection_limit": f"L/{inputs['deflection_divisor']}",
+            "point_loads": inputs["point_loads"],
+            "uniform_loads": inputs["uniform_loads"],
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as design_file:
+                json.dump(document, design_file, indent=2)
+                design_file.write("\n")
+        except OSError as exc:
+            messagebox.showerror("Cannot save beam", str(exc), parent=self.root)
+            return
+
+        self.current_file = path
+        self._update_window_title()
+        self.status_var.set(f"Saved {path}")
+
+    def export_results(self) -> None:
+        try:
+            inputs = self._read_inputs()
+            result = calc.analyze_beam(**inputs)
+        except (ValueError, tk.TclError, ZeroDivisionError) as exc:
+            self.export_button.configure(state="disabled")
+            messagebox.showerror("Cannot export results", str(exc), parent=self.root)
+            return
+
+        path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Export beam results",
+            defaultextension=".csv",
+            filetypes=(("CSV files", "*.csv"), ("All files", "*.*")),
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as csv_file:
+                writer = csv.writer(csv_file)
+                writer.writerow(("x (ft)", "V (kips)", "M (kip-ft)", "Deflection (in)"))
+                writer.writerows(
+                    zip(
+                        result["plot_x"],
+                        result["plot_shear"],
+                        result["plot_moment"],
+                        result["plot_deflection"],
+                    )
+                )
+        except (OSError, csv.Error) as exc:
+            messagebox.showerror("Cannot export results", str(exc), parent=self.root)
+            return
+        self.status_var.set(f"Exported results to {path}")
+
+    def export_calculation_sheet(self) -> None:
+        try:
+            inputs = self._read_inputs()
+            result = calc.analyze_beam(**inputs)
+        except (ValueError, tk.TclError, ZeroDivisionError) as exc:
+            self.export_button.configure(state="disabled")
+            self.calculation_sheet_button.configure(state="disabled")
+            messagebox.showerror("Cannot create calculation sheet", str(exc), parent=self.root)
+            return
+
+        path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Save calculation sheet",
+            defaultextension=".pdf",
+            filetypes=(("PDF files", "*.pdf"), ("All files", "*.*")),
+        )
+        if not path:
+            return
+        try:
+            self._write_calculation_sheet(path, result, inputs)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Cannot create calculation sheet", str(exc), parent=self.root)
+            return
+        self.status_var.set(f"Saved calculation sheet to {path}")
+
+    @staticmethod
+    def _write_calculation_sheet(
+        path: str, result: dict[str, Any], inputs: dict[str, Any]
+    ) -> None:
+        figure = Figure(figsize=(8.5, 11), dpi=150, facecolor="white")
+        figure.text(
+            0.075, 0.966, "Beam Design Calculation Sheet",
+            fontsize=17, fontweight="bold", color=INK, va="top",
+        )
+        point_text = "; ".join(
+            f"{load['magnitude']:g} k at {load['position']:g} ft"
+            for load in inputs["point_loads"]
+        ) or "None"
+        uniform_text = "; ".join(
+            f"{load['magnitude']:g} k/ft from {load['start']:g} to {load['end']:g} ft"
+            for load in inputs["uniform_loads"]
+        ) or "None"
+        input_lines: list[str] = []
+        for line in (
+            f"Support: {inputs['support']}    Span: {inputs['span_ft']:g} ft",
+            f"Material: {inputs['material']}    Section: {inputs['section_name']}    "
+            f"Deflection limit: L/{inputs['deflection_divisor']}",
+            f"Point loads: {point_text}",
+            f"Uniform loads: {uniform_text}",
+        ):
+            input_lines.extend(textwrap.wrap(line, width=96, break_long_words=False) or [""])
+        figure.text(
+            0.075, 0.929, "BEAM INPUTS",
+            fontsize=9.5, fontweight="bold", color=ACCENT, va="top",
+        )
+        input_top = 0.902
+        figure.text(
+            0.075, input_top, "\n".join(input_lines),
+            fontsize=10, color=INK, va="top", linespacing=1.4,
+        )
+        input_bottom = input_top - len(input_lines) * 0.022
+        checks_heading_y = input_bottom - 0.028
+        figure.text(
+            0.075, checks_heading_y, "DESIGN CHECKS",
+            fontsize=9.5, fontweight="bold", color=ACCENT, va="top",
+        )
+        section = result["section"]
+        bending_color = GREEN if result["bending_pass"] else RED
+        deflection_color = GREEN if result["deflection_pass"] else RED
+        bending_title_y = checks_heading_y - 0.027
+        figure.text(
+            0.075, bending_title_y, f"BENDING TEST: {'PASS' if result['bending_pass'] else 'FAIL'}",
+            fontsize=10, fontweight="bold", color=bending_color, va="top",
+        )
+        bending_detail_y = bending_title_y - 0.023
+        figure.text(
+            0.075, bending_detail_y,
+            f"Actual: {result['stress']:.2f} ksi    Allowable: {section['Fb']:.2f} ksi    "
+            f"Ratio: {result['bending_ratio']:.0%}",
+            fontsize=9.5, color=INK, va="top",
+        )
+        deflection_title_y = bending_detail_y - 0.033
+        figure.text(
+            0.075, deflection_title_y,
+            f"DEFLECTION TEST: {'PASS' if result['deflection_pass'] else 'FAIL'}",
+            fontsize=10, fontweight="bold", color=deflection_color, va="top",
+        )
+        deflection_detail_y = deflection_title_y - 0.023
+        figure.text(
+            0.075, deflection_detail_y,
+            f"Actual: {result['max_deflection']:.3f} in    "
+            f"Allowable: {result['deflection_limit']:.3f} in    "
+            f"Ratio: {result['deflection_ratio']:.0%}",
+            fontsize=9.5, color=INK, va="top",
+        )
+        chart_top = max(deflection_detail_y - 0.05, 0.34)
+        grid = figure.add_gridspec(
+            4, 1, left=0.135, right=0.965, bottom=0.07, top=chart_top,
+            height_ratios=(0.8, 1, 1, 1), hspace=0.38,
+        )
+        ax_beam = figure.add_subplot(grid[0, 0])
+        ax_shear = figure.add_subplot(grid[1, 0], sharex=ax_beam)
+        ax_moment = figure.add_subplot(grid[2, 0], sharex=ax_beam)
+        ax_deflection = figure.add_subplot(grid[3, 0], sharex=ax_beam)
+        axes = (ax_beam, ax_shear, ax_moment, ax_deflection)
+        for ax in axes:
+            ax.set_facecolor("white")
+            ax.tick_params(axis="both", labelsize=7, colors=MUTED)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.spines["left"].set_color("#cbd5e1")
+            ax.spines["bottom"].set_color("#cbd5e1")
+
+        span = result["span_ft"]
+        ax_beam.set_xlim(0, span)
+        ax_beam.set_ylim(-0.65, 1.55)
+        ax_beam.set_yticks([])
+        ax_beam.set_title("Beam, supports, and loads", loc="left", fontsize=8, color=INK, pad=2)
+        ax_beam.plot([0, span], [0, 0], color=INK, linewidth=3)
+        if result["support"] == "Simply supported":
+            ax_beam.add_patch(Polygon([[0, -0.06], [-0.23, -0.40], [0.23, -0.40]], color="#51677f"))
+            ax_beam.add_patch(Polygon([[span, -0.06], [span - 0.23, -0.40], [span + 0.23, -0.40]], color="#51677f"))
+        else:
+            ax_beam.add_patch(Rectangle((-0.13, -0.42), 0.13, 0.84, color="#51677f"))
+        for load in result["uniforms"]:
+            a, b, magnitude = load["start"], load["end"], load["magnitude"]
+            count = max(2, min(36, int((b - a) * 1.5) + 1))
+            for xpos in np.linspace(a, b, count):
+                ax_beam.annotate(
+                    "", xy=(xpos, 0.08), xytext=(xpos, 0.84),
+                    arrowprops={"arrowstyle": "-|>", "color": ACCENT, "lw": 0.8},
+                )
+            ax_beam.text(
+                (a + b) / 2, 0.94, f"{magnitude:g} k/ft",
+                ha="center", fontsize=7, color=ACCENT,
+            )
+        for load in result["points"]:
+            xpos, magnitude = load["position"], load["magnitude"]
+            ax_beam.annotate(
+                "", xy=(xpos, 0.08), xytext=(xpos, 1.20),
+                arrowprops={"arrowstyle": "-|>", "color": RED, "lw": 1.1},
+            )
+            ax_beam.text(xpos, 1.26, f"{magnitude:g} k", ha="center", fontsize=7, color=RED)
+        reactions = result["reactions"]
+        ax_beam.annotate(
+            "", xy=(0, -0.02), xytext=(0, -0.52),
+            arrowprops={"arrowstyle": "-|>", "color": GREEN, "lw": 1.0},
+        )
+        ax_beam.text(0.12, -0.28, f"{reactions['left']:.2f} k", fontsize=7, color=GREEN)
+        if result["support"] == "Simply supported":
+            ax_beam.annotate(
+                "", xy=(span, -0.02), xytext=(span, -0.52),
+                arrowprops={"arrowstyle": "-|>", "color": GREEN, "lw": 1.0},
+            )
+            ax_beam.text(
+                span - 0.12, -0.28, f"{reactions['right']:.2f} k",
+                fontsize=7, color=GREEN, ha="right",
+            )
+        ax_beam.grid(axis="x", color="#e2e8f0", linewidth=0.5)
+        ax_beam.tick_params(axis="x", labelbottom=False, length=0)
+
+        plot_x = result["plot_x"]
+        charts = (
+            (ax_shear, result["plot_shear"], "Shear V (kips)", "#dceafe", ACCENT),
+            (ax_moment, result["plot_moment"], "Moment M (kip-ft)", "#e0f2e9", GREEN),
+        )
+        for ax, values, ylabel, fill, line_color in charts:
+            ax.axhline(0, color="#64748b", linewidth=0.6)
+            ax.fill_between(plot_x, values, 0, color=fill, alpha=0.95)
+            ax.plot(plot_x, values, color=line_color, linewidth=1.0)
+            ax.set_ylabel(ylabel, fontsize=7, color=INK)
+            ax.grid(axis="x", color="#e2e8f0", linewidth=0.5)
+            ax.grid(axis="y", color="#eef2f6", linewidth=0.4)
+        max_shear_index = int(np.argmax(np.abs(result["shear"])))
+        ax_shear.annotate(
+            f"Max |V| = {result['max_shear']:.2f} k",
+            xy=(result["max_shear_x"], result["shear"][max_shear_index]),
+            xytext=(4, 4), textcoords="offset points", fontsize=6.5, color=ACCENT,
+        )
+        ax_moment.annotate(
+            f"Max |M| = {result['max_moment']:.2f} kip-ft",
+            xy=(result["max_moment_x"], result["max_moment_signed"]),
+            xytext=(4, 4), textcoords="offset points", fontsize=6.5, color=GREEN,
+        )
+        y = result["deflection"]
+        max_y = float(np.max(np.abs(y)))
+        display_y = np.zeros_like(y) if max_y == 0 else -y * (0.48 / max_y)
+        ax_deflection.axhline(0, color="#64748b", linewidth=0.6)
+        ax_deflection.fill_between(result["x"], display_y, 0, color="#f7e7d5", alpha=0.95)
+        ax_deflection.plot(result["x"], display_y, color="#c47a30", linewidth=1.1)
+        ax_deflection.set_ylabel("Deflection y (in)", fontsize=7, color=INK)
+        ax_deflection.set_xlabel("Position x (ft)", fontsize=7, color=INK)
+        ax_deflection.grid(axis="x", color="#e2e8f0", linewidth=0.5)
+        ax_deflection.grid(axis="y", color="#eef2f6", linewidth=0.4)
+        max_y_index = int(np.argmax(np.abs(y)))
+        ax_deflection.annotate(
+            f"Max |y| = {result['max_deflection']:.3f} in",
+            xy=(result["max_deflection_x"], display_y[max_y_index]),
+            xytext=(4, 4), textcoords="offset points", fontsize=6.5, color="#9b5c20",
+        )
+        ax_deflection.set_xlim(0, span)
+        ax_deflection.set_xticks(ax_beam.get_xticks())
+        ax_shear.tick_params(axis="x", labelbottom=False)
+        ax_moment.tick_params(axis="x", labelbottom=False)
+
+        with PdfPages(path) as pdf:
+            pdf.savefig(figure, facecolor="white")
+        figure.clear()
+
+    def open_design(self) -> None:
+        path = filedialog.askopenfilename(
+            parent=self.root,
+            title="Open beam",
+            filetypes=(("Beam Designer files", "*.json"), ("All files", "*.*")),
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as design_file:
+                document = json.load(design_file)
+            inputs = self._parse_design(document)
+            # Run the standalone analyzer before changing the current design.
+            calc.analyze_beam(**inputs)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError, KeyError, OverflowError) as exc:
+            messagebox.showerror("Cannot open beam", str(exc), parent=self.root)
+            return
+
+        self.support_var.set(inputs["support"])
+        self.span_var.set(inputs["span_ft"])
+        self.material_var.set(inputs["material"])
+        self._set_section_values()
+        self.section_var.set(inputs["section_name"])
+        self.limit_var.set(f"L/{inputs['deflection_divisor']}")
+
+        for row in self.point_rows + self.uniform_rows:
+            row["frame"].destroy()
+        self.point_rows.clear()
+        self.uniform_rows.clear()
+        for load in inputs["point_loads"]:
+            self.add_point_load(repr(load["magnitude"]), repr(load["position"]))
+        for load in inputs["uniform_loads"]:
+            self.add_uniform_load(
+                repr(load["magnitude"]), repr(load["start"]), repr(load["end"])
+            )
+
+        self.current_file = path
+        self._update_window_title()
+        if self.refresh_after_id is not None:
+            self.root.after_cancel(self.refresh_after_id)
+            self.refresh_after_id = None
+        self.refresh()
+
+    @staticmethod
+    def _parse_design(document: Any) -> dict[str, Any]:
+        if not isinstance(document, dict) or document.get("format") != "beam-designer":
+            raise ValueError("This is not a Beam Designer file.")
+        if document.get("version") != 1:
+            raise ValueError("This Beam Designer file version is not supported.")
+
+        support = document["support"]
+        span_ft = float(document["span_ft"])
+        material = document["material"]
+        section_name = document["section"]
+        limit_label = document["deflection_limit"]
+        if support not in ("Simply supported", "Cantilever"):
+            raise ValueError("The saved support type is not supported.")
+        if not math.isfinite(span_ft) or not 4 <= span_ft <= 40:
+            raise ValueError("The saved span must be between 4 and 40 ft.")
+        if material not in calc.MATERIALS:
+            raise ValueError("The saved material is not supported.")
+        if section_name not in calc.sections_for(material):
+            raise ValueError("The saved section does not belong to the selected material.")
+        if limit_label not in ("L/240", "L/360"):
+            raise ValueError("The saved deflection limit is not supported.")
+
+        point_data = document["point_loads"]
+        uniform_data = document["uniform_loads"]
+        if not isinstance(point_data, list) or not isinstance(uniform_data, list):
+            raise ValueError("Saved loads must be lists.")
+        points = [
+            {"magnitude": float(load["magnitude"]), "position": float(load["position"])}
+            for load in point_data
+            if isinstance(load, dict)
+        ]
+        uniforms = [
+            {
+                "magnitude": float(load["magnitude"]),
+                "start": float(load["start"]),
+                "end": float(load["end"]),
+            }
+            for load in uniform_data
+            if isinstance(load, dict)
+        ]
+        if len(points) != len(point_data) or len(uniforms) != len(uniform_data):
+            raise ValueError("Each saved load must be an object with its required values.")
+        return {
+            "support": support,
+            "span_ft": span_ft,
+            "material": material,
+            "section_name": section_name,
+            "deflection_divisor": int(limit_label.split("/")[-1]),
+            "point_loads": points,
+            "uniform_loads": uniforms,
+        }
+
+    def _update_window_title(self) -> None:
+        if self.current_file:
+            self.root.title(f"Beam Designer — {Path(self.current_file).name}")
+        else:
+            self.root.title("Beam Designer")
+
     def refresh(self) -> None:
         self.refresh_after_id = None
         try:
@@ -421,8 +829,12 @@ class BeamDesigner:
             result = calc.analyze_beam(**inputs)
         except (ValueError, tk.TclError, ZeroDivisionError) as exc:
             self.status_var.set(f"Input needs attention: {exc}")
+            self.export_button.configure(state="disabled")
+            self.calculation_sheet_button.configure(state="disabled")
             return
         self.result = result
+        self.export_button.configure(state="normal")
+        self.calculation_sheet_button.configure(state="normal")
         self.status_var.set("Results update as inputs change. Drag a point load to reposition it.")
         self._update_results(result)
         self._draw_beam_and_diagrams(result, inputs)
