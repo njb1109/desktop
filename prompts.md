@@ -71,3 +71,13 @@
 - Changed: Prepared the application, spec, and prompt-log updates for commit; left untracked generated files untouched.
 - Worked: Yes; committed as f84c23b.
 
+
+## 2026-11-23
+- Asked: Rerun the validation cases in `spec.md` and confirm they still pass.
+- Changed: Reran all five cases against `04_app/beam_calculations.py` and recorded the result here.
+- Worked: Yes; all stated numerical values matched. Cases 1, 2, and 4 pass both checks; case 3 fails deflection as expected. Case 5 matches its stated reactions and moment.
+
+## 2026-11-23
+- Asked: Write a short README describing the app, packages to install, and startup command.
+- Changed: Added `04_app/README.md` with a brief overview, install command, and `python.app.py` launch command; logged this request.
+- Worked: Yes; the README is in place.
